@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Онлайн Морской бой</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f0f8ff;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #0066cc;
+    }
+    .game-container {
+      display: flex;
+      justify-content: space-around;
+      flex-wrap: wrap;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .board-container {
+      margin: 10px;
+    }
+    .board-title {
+      text-align: center;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(10, 30px);
+      grid-template-rows: repeat(10, 30px);
+      gap: 1px;
+      background-color: #333;
+      border: 2px solid #0066cc;
+    }
+    .cell {
+      width: 30px;
+      height: 30px;
+      background-color: #add8e6;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+    }
+    .cell.ship {
+      background-color: #4682b4;
+    }
+    .cell.hit {
+      background-color: #ff6b6b;
+    }
+    .cell.miss {
+      background-color: #e0e0e0;
+    }
+    .cell.hit.ship::after {
+      content: "✖";
+      color: white;
+      font-size: 20px;
+    }
+    .cell.miss::after {
+      content: "•";
+      color: #555;
+      font-size: 20px;
+    }
+    .controls {
+      text-align: center;
+      margin: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      background-color: #0066cc;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 5px;
+    }
+    button:hover {
+      background-color: #0055aa;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .message {
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      margin: 20px;
+      min-height: 27px;
+    }
+    .ship-count {
+      margin-top: 10px;
+      text-align: center;
+    }
+    .setup-options {
+      margin: 15px 0;
+      text-align: center;
+    }
+    .connection-panel {
+      background-color: #e6f2ff;
+      padding: 15px;
+      border-radius: 5px;
+      max-width: 500px;
+      margin: 20px auto;
+    }
+    input {
+      padding: 8px;
+      margin: 5px;
+      width: 200px;
+    }
+    .current-player {
+      background-color: #ffff99;
+      padding: 5px 10px;
+      border-radius: 5px;
+    }
+  </style>
+  <!-- Добавляем Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+</head>
+<body>
+  <h1>Онлайн Морской бой</h1>
+  
+  <div class="connection-panel" id="connection-panel">
+    <h2>Подключение к игре</h2>
+    <div>
+      <input type="text" id="game-id" placeholder="ID игры">
+      <button id="join-game">Присоединиться к игре</button>
+    </div>
+    <div>
+      <button id="create-game">Создать новую игру</button>
+    </div>
+    <div id="game-link" style="margin-top: 10px; display: none;">
+      Ссылка для второго игрока: <span id="link-text"></span>
+    </div>
+  </div>
+  
+  <div class="message" id="message">Подключитесь к игре или создайте новую</div>
+  
+  <div class="controls" id="game-controls" style="display: none;">
+    <button id="randomize">Случайная расстановка</button>
+    <button id="ready">Готов к игре</button>
+    <button id="restart">Новая игра</button>
+  </div>
+  
+  <div class="game-container" id="game-area" style="display: none;">
+    <div class="board-container">
+      <div class="board-title">Ваше поле <span id="player-indicator" class="current-player"></span></div>
+      <div class="board" id="player-board"></div>
+      <div class="ship-count" id="player-ships">Корабли: 10</div>
+    </div>
+    <div class="board-container">
+      <div class="board-title">Поле противника</div>
+      <div class="board" id="enemy-board"></div>
+      <div class="ship-count" id="enemy-ships">Корабли: 10</div>
+    </div>
+  </div>
+
+  <script>
+    // Конфигурация Firebase (замените на свою)
+    const firebaseConfig = {
+      apiKey: "AIzaSyAEXTcJBwrXOcbwKVCg4xVKdKE6Nk1EwmU",
+      authDomain: "morskoyboy-1eeb6.firebaseapp.com",
+      projectId: "morskoyboy-1eeb6",
+      storageBucket: "morskoyboy-1eeb6.firebasestorage.app",
+      messagingSenderId: "817864779601",
+      appId: "1:817864779601:web:50db19d3aa3fcd86775570",
+      measurementId: "G-YGKJF8T2F4"
+    };
+    
+    // Инициализация Firebase
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      // Константы игры
+      const SHIP_SIZES = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1];
+      const BOARD_SIZE = 10;
+      
+      // Элементы DOM
+      const playerBoard = document.getElementById('player-board');
+      const enemyBoard = document.getElementById('enemy-board');
+      const randomizeBtn = document.getElementById('randomize');
+      const readyBtn = document.getElementById('ready');
+      const restartBtn = document.getElementById('restart');
+      const messageEl = document.getElementById('message');
+      const playerShipsEl = document.getElementById('player-ships');
+      const enemyShipsEl = document.getElementById('enemy-ships');
+      const createGameBtn = document.getElementById('create-game');
+      const joinGameBtn = document.getElementById('join-game');
+      const gameIdInput = document.getElementById('game-id');
+      const connectionPanel = document.getElementById('connection-panel');
+      const gameControls = document.getElementById('game-controls');
+      const gameArea = document.getElementById('game-area');
+      const gameLink = document.getElementById('game-link');
+      const linkText = document.getElementById('link-text');
+      const playerIndicator = document.getElementById('player-indicator');
+      
+      // Состояние игры
+      let gameState = 'connection'; // 'connection', 'setup', 'waiting', 'playing', 'gameover'
+      let playerShips = [];
+      let enemyShips = [];
+      let currentPlayer = null; // 'player1' или 'player2'
+      let gameId = null;
+      let playerRole = null; // 'host' или 'guest'
+      let playerHits = 0;
+      let enemyHits = 0;
+      let gameRef = null;
+      let shipsPlaced = false;
+      
+      // Инициализация игровых полей
+      function initBoards() {
+        playerBoard.innerHTML = '';
+        enemyBoard.innerHTML = '';
+        
+        for (let y = 0; y < BOARD_SIZE; y++) {
+          for (let x = 0; x < BOARD_SIZE; x++) {
+            // Поле игрока
+            const playerCell = document.createElement('div');
+            playerCell.className = 'cell';
+            playerCell.dataset.x = x;
+            playerCell.dataset.y = y;
+            playerCell.addEventListener('click', handlePlayerBoardClick);
+            playerBoard.appendChild(playerCell);
+            
+            // Поле противника
+            const enemyCell = document.createElement('div');
+            enemyCell.className = 'cell';
+            enemyCell.dataset.x = x;
+            enemyCell.dataset.y = y;
+            enemyCell.addEventListener('click', handleEnemyBoardClick);
+            enemyBoard.appendChild(enemyCell);
+          }
+        }
+      }
+      
+      // Обработчик клика по полю игрока (в режиме расстановки)
+      function handlePlayerBoardClick(e) {
+        if (gameState !== 'setup') return;
+        
+        const x = parseInt(e.target.dataset.x);
+        const y = parseInt(e.target.dataset.y);
+        
+        // Проверяем, можно ли разместить корабль размера 1
+        if (canPlaceShip(x, y, 1, 'horizontal', playerShips)) {
+          placeShip(x, y, 1, 'horizontal', playerShips, true);
+          updateShipCount();
+        }
+      }
+      
+      // Обработчик клика по полю противника (во время игры)
+      function handleEnemyBoardClick(e) {
+        if (gameState !== 'playing' || currentPlayer !== playerRole) return;
+        
+        const x = parseInt(e.target.dataset.x);
+        const y = parseInt(e.target.dataset.y);
+        
+        // Проверяем, не стреляли ли уже в эту клетку
+        const cell = e.target;
+        if (cell.classList.contains('hit') || cell.classList.contains('miss')) {
+          return;
+        }
+        
+        // Отправляем выстрел в Firebase
+        gameRef.child('moves').push({
+          player: playerRole,
+          x: x,
+          y: y,
+          timestamp: firebase.database.ServerValue.TIMESTAMP
+        });
+      }
+      
+      // Обработка хода
+      function processMove(move) {
+        const x = move.x;
+        const y = move.y;
+        const isMyMove = move.player === playerRole;
+        
+        if (isMyMove) {
+          // Это мой ход - обновляем поле противника
+          const cell = enemyBoard.children[y * BOARD_SIZE + x];
+          
+          if (checkHit(x, y, enemyShips)) {
+            cell.classList.add('hit');
+            playerHits++;
+            updateShipCount();
+            
+            // Проверяем, потоплен ли корабль
+            const ship = findShip(x, y, enemyShips);
+            if (isShipSunk(ship, enemyShips)) {
+              markSunkShip(ship, false);
+              messageEl.textContent = 'Корабль противника потоплен!';
+            }
+            
+            // Проверяем конец игры
+            if (playerHits === 20) {
+              endGame(playerRole);
+              return;
+            }
+            
+            // Можно ходить еще раз при попадании
+            currentPlayer = playerRole;
+            updatePlayerIndicator();
+          } else {
+            cell.classList.add('miss');
+            currentPlayer = playerRole === 'player1' ? 'player2' : 'player1';
+            updatePlayerIndicator();
+            messageEl.textContent = currentPlayer === playerRole ? 'Ваш ход!' : 'Ход противника...';
+          }
+        } else {
+          // Это ход противника - обновляем мое поле
+          const cell = playerBoard.children[y * BOARD_SIZE + x];
+          
+          if (checkHit(x, y, playerShips)) {
+            cell.classList.add('hit');
+            enemyHits++;
+            updateShipCount();
+            
+            // Проверяем, потоплен ли корабль
+            const ship = findShip(x, y, playerShips);
+            if (isShipSunk(ship, playerShips)) {
+              markSunkShip(ship, true);
+            }
+            
+            // Проверяем конец игры
+            if (enemyHits === 20) {
+              endGame(playerRole === 'player1' ? 'player2' : 'player1');
+              return;
+            }
+            
+            // Противник может ходить еще раз при попадании
+            currentPlayer = move.player;
+            updatePlayerIndicator();
+          } else {
+            cell.classList.add('miss');
+            currentPlayer = playerRole;
+            updatePlayerIndicator();
+            messageEl.textContent = 'Ваш ход!';
+          }
+        }
+      }
+      
+      // Проверка попадания
+      function checkHit(x, y, ships) {
+        for (let ship of ships) {
+          for (let part of ship.parts) {
+            if (part.x === x && part.y === y && !part.hit) {
+              part.hit = true;
+              ship.hits.push({x, y});
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+      
+      // Поиск корабля по координатам
+      function findShip(x, y, ships) {
+        for (let ship of ships) {
+          for (let part of ship.parts) {
+            if (part.x === x && part.y === y) {
+              return ship;
+            }
+          }
+        }
+        return null;
+      }
+      
+      // Проверка, потоплен ли корабль
+      function isShipSunk(ship, ships) {
+        return ship.hits.length === ship.size;
+      }
+      
+      // Помечаем потопленный корабль
+      function markSunkShip(ship, isPlayerBoard) {
+        // Добавляем промахи вокруг корабля
+        for (let part of ship.parts) {
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              const x = part.x + dx;
+              const y = part.y + dy;
+              
+              if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
+                const cell = isPlayerBoard 
+                  ? playerBoard.children[y * BOARD_SIZE + x]
+                  : enemyBoard.children[y * BOARD_SIZE + x];
+                
+                if (!cell.classList.contains('hit') && !cell.classList.contains('miss')) {
+                  cell.classList.add('miss');
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      // Конец игры
+      function endGame(winner) {
+        gameState = 'gameover';
+        if (winner === playerRole) {
+          messageEl.textContent = 'Поздравляем! Вы победили!';
+        } else {
+          messageEl.textContent = 'Вы проиграли. Попробуйте еще раз!';
+        }
+        
+        // Отключаем слушатели Firebase
+        if (gameRef) {
+          gameRef.off();
+        }
+      }
+      
+      // Размещение корабля
+      function placeShip(x, y, size, direction, ships, isVisible) {
+        const ship = {
+          size,
+          direction,
+          parts: [],
+          hits: []
+        };
+        
+        for (let i = 0; i < size; i++) {
+          const part = {
+            x: direction === 'horizontal' ? x + i : x,
+            y: direction === 'vertical' ? y + i : y,
+            hit: false
+          };
+          ship.parts.push(part);
+          
+          // Отмечаем на доске
+          if (isVisible) {
+            const cell = playerBoard.children[part.y * BOARD_SIZE + part.x];
+            cell.classList.add('ship');
+          }
+        }
+        
+        ships.push(ship);
+      }
+      
+      // Проверка возможности размещения корабля
+      function canPlaceShip(x, y, size, direction, ships) {
+        // Проверяем границы
+        if (direction === 'horizontal') {
+          if (x + size > BOARD_SIZE) return false;
+        } else {
+          if (y + size > BOARD_SIZE) return false;
+        }
+        
+        // Проверяем соседние клетки
+        for (let i = -1; i <= size; i++) {
+          for (let j = -1; j <= 1; j++) {
+            let checkX, checkY;
+            
+            if (direction === 'horizontal') {
+              checkX = x + i;
+              checkY = y + j;
+            } else {
+              checkX = x + j;
+              checkY = y + i;
+            }
+            
+            if (checkX >= 0 && checkX < BOARD_SIZE && checkY >= 0 && checkY < BOARD_SIZE) {
+              // Проверяем, не занята ли клетка другим кораблем
+              for (let ship of ships) {
+                for (let part of ship.parts) {
+                  if (part.x === checkX && part.y === checkY) {
+                    return false;
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        return true;
+      }
+      
+      // Случайная расстановка кораблей
+      function randomizeShips() {
+        // Очищаем текущие корабли
+        playerShips = [];
+        clearBoard(playerBoard);
+        
+        // Расставляем корабли случайным образом
+        for (let size of SHIP_SIZES) {
+          let placed = false;
+          let attempts = 0;
+          
+          while (!placed && attempts < 100) {
+            attempts++;
+            const x = Math.floor(Math.random() * BOARD_SIZE);
+            const y = Math.floor(Math.random() * BOARD_SIZE);
+            const direction = Math.random() < 0.5 ? 'horizontal' : 'vertical';
+            
+            if (canPlaceShip(x, y, size, direction, playerShips)) {
+              placeShip(x, y, size, direction, playerShips, true);
+              placed = true;
+            }
+          }
+          
+          if (!placed) {
+            // Если не удалось разместить корабль после 100 попыток, начинаем заново
+            return randomizeShips();
+          }
+        }
+        
+        updateShipCount();
+        shipsPlaced = true;
+        readyBtn.disabled = false;
+      }
+      
+      // Очистка доски
+      function clearBoard(board) {
+        for (let cell of board.children) {
+          cell.className = 'cell';
+        }
+      }
+      
+      // Обновление счетчика кораблей
+      function updateShipCount() {
+        const playerAlive = playerShips.reduce((count, ship) => count + (ship.hits.length < ship.size ? 1 : 0), 0);
+        const enemyAlive = enemyShips.reduce((count, ship) => count + (ship.hits.length < ship.size ? 1 : 0), 0);
+        
+        playerShipsEl.textContent = `Корабли: ${playerAlive}`;
+        enemyShipsEl.textContent = `Корабли: ${enemyAlive}`;
+      }
+      
+      // Обновление индикатора текущего игрока
+      function updatePlayerIndicator() {
+        if (currentPlayer === playerRole) {
+          playerIndicator.textContent = "(Ваш ход)";
+        } else {
+          playerIndicator.textContent = "";
+        }
+      }
+      
+      // Создание новой игры
+      function createNewGame() {
+        gameId = generateGameId();
+        playerRole = 'player1';
+        currentPlayer = 'player1';
+        
+        // Показываем ссылку для присоединения
+        const gameUrl = `${window.location.href.split('?')[0]}?game=${gameId}`;
+        linkText.textContent = gameUrl;
+        gameLink.style.display = 'block';
+        
+        // Создаем игру в Firebase
+        gameRef = database.ref(`games/${gameId}`);
+        
+        gameRef.set({
+          player1: {
+            ready: false,
+            ships: null
+          },
+          player2: {
+            ready: false,
+            ships: null
+          },
+          currentPlayer: 'player1',
+          gameOver: false,
+          winner: null
+        }).then(() => {
+          // Переходим в режим расстановки кораблей
+          startSetup();
+          
+          // Слушаем изменения в игре
+          setupGameListeners();
+        });
+      }
+      
+      // Присоединение к существующей игре
+      function joinGame() {
+        gameId = gameIdInput.value.trim();
+        if (!gameId) {
+          messageEl.textContent = 'Введите ID игры';
+          return;
+        }
+        
+        playerRole = 'player2';
+        
+        // Проверяем существование игры
+        gameRef = database.ref(`games/${gameId}`);
+        
+        gameRef.once('value').then((snapshot) => {
+          if (!snapshot.exists()) {
+            messageEl.textContent = 'Игра с таким ID не найдена';
+            return;
+          }
+          
+          const gameData = snapshot.val();
+          if (gameData.player2.ready) {
+            messageEl.textContent = 'В игре уже есть два игрока';
+            return;
+          }
+          
+          // Переходим в режим расстановки кораблей
+          startSetup();
+          
+          // Слушаем изменения в игре
+          setupGameListeners();
+          
+          // Скрываем панель подключения
+          connectionPanel.style.display = 'none';
+          gameControls.style.display = 'block';
+          gameArea.style.display = 'flex';
+          
+          messageEl.textContent = 'Расставьте свои корабли и нажмите "Готов к игре"';
+        });
+      }
+      
+      // Настройка слушателей Firebase
+      function setupGameListeners() {
+        // Слушаем изменения состояния игры
+        gameRef.on('value', (snapshot) => {
+          const gameData = snapshot.val();
+          if (!gameData) return;
+          
+          // Обновляем текущего игрока
+          if (gameData.currentPlayer && gameData.currentPlayer !== currentPlayer) {
+            currentPlayer = gameData.currentPlayer;
+            updatePlayerIndicator();
+          }
+          
+          // Проверяем, началась ли игра
+          if (gameState === 'waiting' && gameData.player1.ready && gameData.player2.ready) {
+            startGame(gameData);
+          }
+          
+          // Проверяем конец игры
+          if (gameData.gameOver && gameState === 'playing') {
+            endGame(gameData.winner);
+          }
+        });
+        
+        // Слушаем новые ходы
+        gameRef.child('moves').on('child_added', (snapshot) => {
+          if (gameState !== 'playing') return;
+          
+          const move = snapshot.val();
+          processMove(move);
+        });
+      }
+      
+      // Начало режима расстановки кораблей
+      function startSetup() {
+        gameState = 'setup';
+        initBoards();
+        
+        // Скрываем панель подключения
+        connectionPanel.style.display = 'none';
+        gameControls.style.display = 'block';
+        gameArea.style.display = 'flex';
+        
+        messageEl.textContent = playerRole === 'player1' 
+          ? 'Расставьте свои корабли и нажмите "Готов к игре"' 
+          : 'Расставьте свои корабли и нажмите "Готов к игре"';
+        
+        readyBtn.disabled = true;
+        shipsPlaced = false;
+      }
+      
+      // Готовность к игре
+      function readyForGame() {
+        if (!shipsPlaced) {
+          messageEl.textContent = 'Сначала расставьте все корабли!';
+          return;
+        }
+        
+        // Сохраняем корабли в Firebase
+        const shipsData = playerShips.map(ship => ({
+          size: ship.size,
+          direction: ship.direction,
+          parts: ship.parts.map(part => ({x: part.x, y: part.y}))
+        }));
+        
+        gameRef.child(playerRole).update({
+          ready: true,
+          ships: shipsData
+        }).then(() => {
+          if (playerRole === 'player1') {
+            gameState = 'waiting';
+            messageEl.textContent = 'Ожидание второго игрока...';
+          } else {
+            gameState = 'waiting';
+            messageEl.textContent = 'Ожидание начала игры...';
+          }
+        });
+      }
+      
+      // Начало игры
+      function startGame(gameData) {
+        gameState = 'playing';
+        
+        // Загружаем корабли противника
+        const enemyRole = playerRole === 'player1' ? 'player2' : 'player1';
+        const enemyShipsData = gameData[enemyRole].ships;
+        
+        enemyShips = enemyShipsData.map(shipData => ({
+          size: shipData.size,
+          direction: shipData.direction,
+          parts: shipData.parts.map(part => ({
+            x: part.x,
+            y: part.y,
+            hit: false
+          })),
+          hits: []
+        }));
+        
+        // Обновляем текущего игрока
+        currentPlayer = gameData.currentPlayer;
+        updatePlayerIndicator();
+        
+        messageEl.textContent = currentPlayer === playerRole ? 'Ваш ход!' : 'Ход противника...';
+        updateShipCount();
+      }
+      
+      // Генерация ID игры
+      function generateGameId() {
+        return Math.random().toString(36).substr(2, 6).toUpperCase();
+      }
+      
+      // Новая игра
+      function newGame() {
+        // Отключаем слушатели Firebase
+        if (gameRef) {
+          gameRef.off();
+        }
+        
+        // Сбрасываем состояние
+        gameState = 'connection';
+        playerShips = [];
+        enemyShips = [];
+        currentPlayer = null;
+        gameId = null;
+        playerRole = null;
+        playerHits = 0;
+        enemyHits = 0;
+        shipsPlaced = false;
+        
+        // Очищаем доски
+        clearBoard(playerBoard);
+        clearBoard(enemyBoard);
+        
+        // Показываем панель подключения
+        connectionPanel.style.display = 'block';
+        gameControls.style.display = 'none';
+        gameArea.style.display = 'none';
+        gameLink.style.display = 'none';
+        
+        messageEl.textContent = 'Подключитесь к игре или создайте новую';
+        playerIndicator.textContent = "";
+      }
+      
+      // Проверка параметров URL
+      function checkUrlParams() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const gameParam = urlParams.get('game');
+        
+        if (gameParam) {
+          gameIdInput.value = gameParam;
+        }
+      }
+      
+      // Обработчики кнопок
+      createGameBtn.addEventListener('click', createNewGame);
+      joinGameBtn.addEventListener('click', joinGame);
+      randomizeBtn.addEventListener('click', randomizeShips);
+      readyBtn.addEventListener('click', readyForGame);
+      restartBtn.addEventListener('click', newGame);
+      
+      // Инициализация игры
+      checkUrlParams();
+      initBoards();
+  </script>
+</body>
+</html>
